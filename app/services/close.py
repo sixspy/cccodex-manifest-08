@@ -1,9 +1,10 @@
 from app.db import get_db
-from app.services.objects import ServiceError
+from app.services.daycut import assert_day_boundary
+from app.services.errors import ServiceError
 
 
 def close_batch(batch_id: int, db_path: str | None = None) -> dict:
-    with get_db(db_path) as conn:
+    with get_db(db_path, write_lock=True) as conn:
         batch = conn.execute(
             "SELECT * FROM landing_batches WHERE id=?", (batch_id,)
         ).fetchone()
@@ -13,6 +14,7 @@ def close_batch(batch_id: int, db_path: str | None = None) -> dict:
             raise ServiceError("批次已闭合", 409)
         if batch["status"] != "收集中":
             raise ServiceError("仅收集中批次可闭合", 409)
+        assert_day_boundary(conn, batch_id)
         objs = conn.execute(
             "SELECT id FROM landing_objects WHERE batch_id=? AND status='已登记'",
             (batch_id,),

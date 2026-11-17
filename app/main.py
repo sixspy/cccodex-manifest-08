@@ -10,15 +10,20 @@ from litestar.status_codes import HTTP_302_FOUND
 from app.config import Config
 from app.db import init_db
 from app.services import (
+    advance_day,
     close_batch,
     get_batch,
+    get_cut_status,
+    get_settings,
     list_batches,
     list_objects,
     list_reports,
     register_object,
+    run_check,
     run_visibility,
+    update_settings,
 )
-from app.services.objects import ServiceError
+from app.services.errors import ServiceError
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "static"
@@ -126,7 +131,17 @@ async def api_batch_detail(request: Request, batch_id: int) -> dict:
     batch = get_batch(batch_id)
     if not batch:
         raise HTTPException(status_code=404, detail="批次不存在")
-    return {"batch": batch, "objects": list_objects(batch_id)}
+    objects = list_objects(batch_id)
+    cut = get_cut_status()
+    return {
+        "batch": batch,
+        "objects": objects,
+        "day_cut": cut,
+        "is_stale": batch["biz_date"] < cut["current_biz_date"],
+        "mixed_count": sum(
+            1 for o in objects if o["biz_date"] != batch["biz_date"]
+        ),
+    }
 
 
 @post("/api/batches/{batch_id:int}/objects")
@@ -142,7 +157,7 @@ async def api_register(request: Request, batch_id: int) -> Response:
         )
     except ServiceError as exc:
         return Response(
-            content={"ok": False, "error": exc.message},
+            content={"ok": False, "error": exc.message, **exc.extra},
             status_code=exc.status_code,
             media_type="application/json",
         )
@@ -166,6 +181,65 @@ async def api_close(request: Request, batch_id: int) -> Response:
         )
     return Response(
         content={"ok": True, "run": run},
+        status_code=200,
+        media_type="application/json",
+    )
+
+
+@get("/api/day-cut")
+async def api_day_cut(request: Request) -> dict:
+    require_user(request)
+    return get_settings()
+
+
+@post("/api/day-cut/settings")
+async def api_day_cut_settings(request: Request) -> Response:
+    require_user(request)
+    body = await request.json()
+    try:
+        setting = update_settings(
+            str(body.get("current_biz_date", "")),
+            str(body.get("policy", "")),
+        )
+    except ServiceError as exc:
+        return Response(
+            content={"ok": False, "error": exc.message, **exc.extra},
+            status_code=exc.status_code,
+            media_type="application/json",
+        )
+    return Response(
+        content={"ok": True, "setting": setting},
+        status_code=200,
+        media_type="application/json",
+    )
+
+
+@post("/api/day-cut/advance")
+async def api_day_cut_advance(request: Request) -> Response:
+    require_user(request)
+    body = await request.json()
+    try:
+        result = advance_day(str(body.get("biz_date", "")))
+    except ServiceError as exc:
+        return Response(
+            content={"ok": False, "error": exc.message, **exc.extra},
+            status_code=exc.status_code,
+            media_type="application/json",
+        )
+    return Response(
+        content={"ok": True, **result},
+        status_code=200,
+        media_type="application/json",
+    )
+
+
+@post("/api/day-cut/check")
+async def api_day_cut_check(request: Request) -> Response:
+    require_user(request)
+    body = await request.json()
+    result = run_check(str(body.get("as_of_date", "")))
+    return Response(
+        content={"ok": True, "check": result},
         status_code=200,
         media_type="application/json",
     )
@@ -203,6 +277,10 @@ app = Litestar(
         api_close,
         api_reports,
         api_run_report,
+        api_day_cut,
+        api_day_cut_settings,
+        api_day_cut_advance,
+        api_day_cut_check,
         create_static_files_router(path="/static", directories=[str(STATIC)]),
     ],
     on_startup=[_on_startup],

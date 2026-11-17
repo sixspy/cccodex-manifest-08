@@ -90,4 +90,7 @@ th { color: var(--muted); font-weight: 500; }
   font-size: 0.75rem;
 }
 .muted { color: var(--muted); }
+.pill.warn { border-color: var(--danger); color: var(--danger); }
+.fate { font-size: 0.85rem; color: var(--accent); margin: 0.4rem 0; }
+.fate.warn { color: var(--danger); }
 .panel { margin-top: 1rem; padding-top: 0.5rem; border-top: 1px dashed var(--line); }

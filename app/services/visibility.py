@@ -1,4 +1,5 @@
 from app.db import get_db
+from app.services.daycut import boundary_mismatches
 
 
 def list_reports(db_path: str | None = None) -> list[dict]:
@@ -13,7 +14,7 @@ def run_visibility(as_of_date: str, db_path: str | None = None) -> dict:
     day = (as_of_date or "").strip()
     if not day:
         day = "2026-11-16"
-    with get_db(db_path) as conn:
+    with get_db(db_path, write_lock=True) as conn:
         closed = conn.execute(
             "SELECT COUNT(*) AS c FROM landing_batches WHERE status='已闭合' AND biz_date<=?",
             (day,),
@@ -38,16 +39,18 @@ def run_visibility(as_of_date: str, db_path: str | None = None) -> dict:
             "  SELECT COUNT(*) FROM landing_objects o WHERE o.batch_id=b.id AND o.status='已闭合'"
             ")"
         ).fetchone()["c"]
+        # 混日：对象归属日与其批次业务日不一致
+        mixed = len(boundary_mismatches(conn))
         summary = (
             f"截至 {day}：已闭合 {closed} 批，收集中 {open_n} 批，"
-            f"对象 {objects}，孤儿 {orphan}，错位 {mismatch}"
+            f"对象 {objects}，孤儿 {orphan}，错位 {mismatch}，混日 {mixed}"
         )
         cur = conn.execute(
             "INSERT INTO visibility_reports("
             "as_of_date, closed_batch_count, open_batch_count, object_count, "
-            "orphan_object_count, mismatch_count, summary) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (day, closed, open_n, objects, orphan, mismatch, summary),
+            "orphan_object_count, mismatch_count, mixed_object_count, summary) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (day, closed, open_n, objects, orphan, mismatch, mixed, summary),
         )
         row = conn.execute(
             "SELECT * FROM visibility_reports WHERE id=?", (cur.lastrowid,)

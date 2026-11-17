@@ -1,5 +1,3 @@
-import os
-
 import pytest
 from litestar.testing import TestClient
 
@@ -8,10 +6,14 @@ from app.main import app
 
 
 @pytest.fixture()
-def client(tmp_path):
-    db = tmp_path / "test.db"
-    os.environ["DATABASE_PATH"] = str(db)
-    init_db(str(db))
+def db_path(tmp_path):
+    return str(tmp_path / "test.db")
+
+
+@pytest.fixture()
+def client(db_path, monkeypatch):
+    monkeypatch.setenv("DATABASE_PATH", db_path)
+    init_db(db_path)
     with TestClient(app=app) as c:
         yield c
 
